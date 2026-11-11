@@ -283,8 +283,107 @@ map.on('load', async () => {
     raioCentro = [e.lngLat.lng, e.lngLat.lat];    
     aplicarRaio();  });
 
+  // ===== Medição de distância =====  
+  const mBtn = document.getElementById('medir-btn') as HTMLButtonElement;  
+  const mUndo = document.getElementById('medir-undo') as HTMLButtonElement;  
+  let medirAtivo = false;  
+  let pontos: [number, number][] = [];  
+
+  function arcoGrande(p1: [number, number], p2: [number, number], n = 32): [number, number][] {    
+    const [lo1, la1] = [rad(p1[0]), rad(p1[1])];    
+    const [lo2, la2] = [rad(p2[0]), rad(p2[1])];    
+    const d = distKm(p1[0], p1[1], p2[0], p2[1]) / R_TERRA;    
+    if (d === 0) return [p1, p2];    
+    const pts: [number, number][] = [];    
+    for (let i = 0; i <= n; i++) {      
+      const f = i / n;      
+      const A = Math.sin((1 - f) * d) / Math.sin(d);      
+      const B = Math.sin(f * d) / Math.sin(d);      
+      const x = A * Math.cos(la1) * Math.cos(lo1) + B * Math.cos(la2) * Math.cos(lo2);      
+      const y = A * Math.cos(la1) * Math.sin(lo1) + B * Math.cos(la2) * Math.sin(lo2);      
+      const z = A * Math.sin(la1) + B * Math.sin(la2);      
+      pts.push([(Math.atan2(y, x) * 180) / Math.PI, (Math.atan2(z, Math.hypot(x, y)) * 180) / Math.PI]);    }    
+    return pts;  
+  }  
+
+  const ehLinha: any = ['==', ['geometry-type'], 'LineString'];  
+  map.addSource('medir', { type: 'geojson', data: VAZIO });  
+  map.addLayer({ id: 'medir-line', type: 'line', source: 'medir', filter: ehLinha,    
+    paint: { 'line-color': '#22d3ee', 'line-width': 2.5 } });  
+  map.addLayer({ id: 'medir-pts', type: 'circle', source: 'medir', filter: ehPonto,    
+    paint: { 'circle-radius': 5, 'circle-color': '#22d3ee',      
+      'circle-stroke-color': '#ffffff', 'circle-stroke-width': 1.5 } });  
+
+  const fonteMedir = () => map.getSource('medir') as maplibregl.GeoJSONSource;  
+
+  function desenharMedicao() {    
+    const feats: any[] = pontos.map((p) => ({      
+      type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: p } }));    
+    if (pontos.length >= 2) {      
+      const linha: number[][] = [];      
+      for (let i = 1; i < pontos.length; i++) {        
+        const arco = arcoGrande(pontos[i - 1], pontos[i]);        
+        linha.push(...(i === 1 ? arco : arco.slice(1)));      }      
+      feats.push({ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: linha } });    }    
+    fonteMedir().setData({ type: 'FeatureCollection', features: feats } as any);  
+  }  
+
+  function painelMedicao() {    
+    if (pontos.length === 0) {      
+      panel.innerHTML = '<h2>Medir distância</h2><p>Clique no mapa para marcar o primeiro ponto.</p>';      
+      return;    }    
+    if (pontos.length === 1) {      
+      panel.innerHTML = '<h2>Medir distância</h2><p>Ponto 1 marcado. Clique em outro ponto.</p>';      
+      return;    }    
+    const trechos: number[] = [];    
+    for (let i = 1; i < pontos.length; i++) {      
+      trechos.push(distKm(pontos[i - 1][0], pontos[i - 1][1], pontos[i][0], pontos[i][1]));    }    
+    const total = trechos.reduce((s, t) => s + t, 0);    
+    panel.innerHTML = `<h2>Distância</h2>      
+      <p><b>Total:</b> ${fmt(total, 1)} km</p>      
+      <p><b>Trechos:</b></p>      
+      <ol class="top">${trechos.map((t, i) =>        
+        `<li>Ponto ${i + 1} → ${i + 2}<span>${fmt(t, 1)} km</span></li>`).join('')}</ol>      
+      <p class="nota">Linha reta sobre a superfície da Terra, não por estradas.</p>`;  
+  }  
+
+  function ligarMedir(on: boolean, restaurarPainel = true) {    
+    medirAtivo = on;    
+    pontos = [];    
+    document.body.classList.toggle('medir-ativo', on);    
+    mBtn.classList.toggle('ligado', on);    
+    mBtn.textContent = on ? 'Medir: ligado' : 'Medir distância';    
+    fonteMedir().setData(VAZIO);    
+    if (on) {      
+      if (raioAtivo) ligarRaio(false);      
+      limpar();      
+      map.doubleClickZoom.disable();      
+      painelMedicao();    } else {      
+      map.doubleClickZoom.enable();      
+      if (restaurarPainel) panel.innerHTML = PANEL_VAZIO;    }  
+  }  
+
+  mBtn.addEventListener('click', () => ligarMedir(!medirAtivo));  
+  rBtn.addEventListener('click', () => {    
+    if (medirAtivo && raioAtivo) ligarMedir(false, false);  });  
+
+  mUndo.addEventListener('click', () => {    
+    if (!medirAtivo || pontos.length === 0) return;    
+    pontos.pop();    
+    desenharMedicao();    
+    painelMedicao();  });  
+
+  document.addEventListener('keydown', (e) => {    
+    if (e.key === 'Escape' && medirAtivo) ligarMedir(false);  });  
+
+  map.on('click', (e) => {    
+    if (!medirAtivo) return;    
+    pontos.push([e.lngLat.lng, e.lngLat.lat]);    
+    desenharMedicao();    
+    painelMedicao();  });
+
   map.on('click', (e) => {
-    if (raioAtivo) return;
+    if (raioAtivo || medirAtivo) return;
     const m = map.queryRenderedFeatures(e.point, { layers: ['mun-fill'] })[0];
     const ufSel = selEstado
       ? dados.features.find((x: any) => x.properties.cod === selEstado)?.properties.uf

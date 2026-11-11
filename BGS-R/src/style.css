@@ -17,3 +17,9 @@ html, body { margin: 0; height: 100%; background: #0b0f14; color: #e6edf3; font-
 #resultados div:hover, #resultados div.ativo { background: #263140; }
 #resultados small { color: #7d8fa3; margin-left: 6px; }
 #raio-box { display: flex; gap: 8px; margin-top: 10px; }#raio-box button, #raio-box select { background: #0b0f14; color: #e6edf3;  border: 1px solid #263140; border-radius: 6px; padding: 5px 10px; font-size: 14px; cursor: pointer; }#raio-box button { flex: 1; }#raio-box button.ligado { background: #f59e0b; color: #0b0f14; border-color: #f59e0b; }body.raio-ativo .maplibregl-canvas { cursor: crosshair !important; }#panel ol.top { margin: 6px 0; padding-left: 20px; color: #9fb0c3; font-size: 13px; }#panel ol.top li { margin: 3px 0; }#panel ol.top li span { float: right; color: #e6edf3; }#panel ol.top small { color: #7d8fa3; margin-left: 4px; }#panel p.nota { font-size: 12px; color: #7d8fa3; margin-top: 10px; }
+#medir-box { display: flex; gap: 8px; margin-top: 8px; }
+#medir-box button { flex: 1; background: #0b0f14; color: #e6edf3;
+  border: 1px solid #263140; border-radius: 6px; padding: 5px 10px; font-size: 14px; cursor: pointer; }
+#medir-box button.ligado { background: #f59e0b; color: #0b0f14; border-color: #f59e0b; }
+body.medir-ativo .maplibregl-canvas { cursor: crosshair !important; }
+#panel { max-height: calc(100vh - 100px); overflow-y: auto; }
