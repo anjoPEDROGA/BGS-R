@@ -38,6 +38,9 @@ const SEM_MUN: any = ['==', ['get', 'uf'], ''];
 
 map.on('load', async () => {
   const dados = await (await fetch(URL_ESTADOS)).json();
+  const ind: Record<string, any> = await (await fetch('/data/indicadores.json')).json();
+  const fmt = (v: any, casas = 0) =>
+    v == null ? 'sem dados' : Number(v).toLocaleString('pt-BR', { minimumFractionDigits: casas, maximumFractionDigits: casas });
   map.addSource('estados', { type: 'geojson', data: dados, promoteId: 'cod' });
   map.addSource('mun', { type: 'vector', url: URL_MUN, promoteId: { municipios: 'cod' } });
 
@@ -93,8 +96,12 @@ map.on('load', async () => {
       fs('mun', selMun, 'selecionado', true);
       const p: any = m.properties;
       const est = dados.features.find((x: any) => x.properties.uf === p.uf)?.properties;
+          const i = ind[p.cod] ?? {};
       panel.innerHTML = `<h2>${p.nome}</h2>
         <p><b>Estado:</b> ${est?.nome ?? p.uf} (${p.uf})</p>
+        <p><b>População (2022):</b> ${fmt(i.pop)} hab.</p>
+        <p><b>Área:</b> ${fmt(i.area_km2, 2)} km²</p>
+        <p><b>Densidade:</b> ${fmt(i.dens, 2)} hab./km²</p>
         <p><b>Código IBGE:</b> ${p.cod}</p>`;
       return;
     }
