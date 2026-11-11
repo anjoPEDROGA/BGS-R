@@ -1,9 +1,12 @@
 import * as maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
+import { Protocol } from 'pmtiles';
 import './style.css';
 
+maplibregl.addProtocol('pmtiles', new Protocol().tile);
 
 const URL_ESTADOS = '/data/geo/estados.geojson';
+const URL_MUN = `pmtiles://${location.origin}/data/geo/municipios.pmtiles`;
 const panel = document.getElementById('panel')!;
 const PANEL_VAZIO = '<p>Clique em um estado.</p>';
 panel.innerHTML = PANEL_VAZIO;
@@ -23,55 +26,92 @@ const map = new maplibregl.Map({
   attributionControl: false,
 });
 
+const corEstado: any = ['case',
+  ['boolean', ['feature-state', 'selecionado'], false], '#f59e0b',
+  ['boolean', ['feature-state', 'hover'], false], '#3b82f6',
+  '#1f3a5f'];
+const corMun: any = ['case',
+  ['boolean', ['feature-state', 'selecionado'], false], '#f59e0b',
+  ['boolean', ['feature-state', 'hover'], false], '#3b82f6',
+  '#2a4a73'];
+const SEM_MUN: any = ['==', ['get', 'uf'], ''];
+
 map.on('load', async () => {
   const dados = await (await fetch(URL_ESTADOS)).json();
   map.addSource('estados', { type: 'geojson', data: dados, promoteId: 'cod' });
+  map.addSource('mun', { type: 'vector', url: URL_MUN, promoteId: { municipios: 'cod' } });
 
-  map.addLayer({
-    id: 'estados-fill', type: 'fill', source: 'estados',
-    paint: {
-      'fill-color': ['case',
-        ['boolean', ['feature-state', 'selecionado'], false], '#f59e0b',
-        ['boolean', ['feature-state', 'hover'], false], '#3b82f6',
-        '#1f3a5f'],
-      'fill-opacity': 0.75,
-    },
-  });
-  map.addLayer({
-    id: 'estados-line', type: 'line', source: 'estados',
-    paint: { 'line-color': '#5b7fa6', 'line-width': 0.8 },
-  });
+  map.addLayer({ id: 'estados-fill', type: 'fill', source: 'estados', paint: { 'fill-color': corEstado, 'fill-opacity': 0.75 } });
+  map.addLayer({ id: 'mun-fill', type: 'fill', source: 'mun', 'source-layer': 'municipios', filter: SEM_MUN,
+    paint: { 'fill-color': corMun, 'fill-opacity': 0.9 } });
+  map.addLayer({ id: 'mun-line', type: 'line', source: 'mun', 'source-layer': 'municipios', filter: SEM_MUN,
+    paint: { 'line-color': '#7aa2d1', 'line-width': 0.6 } });
+  map.addLayer({ id: 'estados-line', type: 'line', source: 'estados', paint: { 'line-color': '#5b7fa6', 'line-width': 0.8 } });
 
-  let sel: string | null = null;
-  let hov: string | null = null;
-  const set = (id: string, k: string, v: boolean) =>
-    map.setFeatureState({ source: 'estados', id }, { [k]: v });
+  let selEstado: string | null = null;
+  let selMun: string | null = null;
+  const hover: Record<string, string | null> = { estados: null, mun: null };
 
-  map.on('mousemove', 'estados-fill', (e) => {
-    map.getCanvas().style.cursor = 'pointer';
-    const id = e.features?.[0]?.id as string | undefined;
-    if (!id || id === hov) return;
-    if (hov) set(hov, 'hover', false);
-    hov = id; set(id, 'hover', true);
-  });
-  map.on('mouseleave', 'estados-fill', () => {
-    map.getCanvas().style.cursor = '';
-    if (hov) set(hov, 'hover', false);
-    hov = null;
-  });
+  const fs = (src: string, id: string, k: string, v: boolean) =>
+    map.setFeatureState(src === 'mun' ? { source: 'mun', sourceLayer: 'municipios', id } : { source: 'estados', id }, { [k]: v });
+
+  function ligarHover(src: 'estados' | 'mun', camada: string) {
+    map.on('mousemove', camada, (e) => {
+      map.getCanvas().style.cursor = 'pointer';
+      const id = e.features?.[0]?.id as string | undefined;
+      if (!id || id === hover[src]) return;
+      if (hover[src]) fs(src, hover[src]!, 'hover', false);
+      hover[src] = id; fs(src, id, 'hover', true);
+    });
+    map.on('mouseleave', camada, () => {
+      map.getCanvas().style.cursor = '';
+      if (hover[src]) fs(src, hover[src]!, 'hover', false);
+      hover[src] = null;
+    });
+  }
+  ligarHover('estados', 'estados-fill');
+  ligarHover('mun', 'mun-fill');
+
+  function filtroMun(uf: string | null) {
+    const f: any = uf ? ['==', ['get', 'uf'], uf] : SEM_MUN;
+    map.setFilter('mun-fill', f);
+    map.setFilter('mun-line', f);
+  }
+
+  function limpar() {
+    if (selMun) fs('mun', selMun, 'selecionado', false);
+    if (selEstado) fs('estados', selEstado, 'selecionado', false);
+    selMun = null; selEstado = null;
+    filtroMun(null);
+  }
 
   map.on('click', (e) => {
-    const f = map.queryRenderedFeatures(e.point, { layers: ['estados-fill'] })[0];
-    if (sel) set(sel, 'selecionado', false);
-    if (!f) { sel = null; panel.innerHTML = PANEL_VAZIO; return; }
+    const m = selEstado ? map.queryRenderedFeatures(e.point, { layers: ['mun-fill'] })[0] : undefined;
+    if (m) {
+      if (selMun) fs('mun', selMun, 'selecionado', false);
+      selMun = String(m.id);
+      fs('mun', selMun, 'selecionado', true);
+      const p: any = m.properties;
+      const est = dados.features.find((x: any) => x.properties.uf === p.uf)?.properties;
+      panel.innerHTML = `<h2>${p.nome}</h2>
+        <p><b>Estado:</b> ${est?.nome ?? p.uf} (${p.uf})</p>
+        <p><b>Código IBGE:</b> ${p.cod}</p>`;
+      return;
+    }
 
-    sel = String(f.id);
-    set(sel, 'selecionado', true);
-    const feat = dados.features.find((x: any) => x.properties.cod === sel);
+    const f = map.queryRenderedFeatures(e.point, { layers: ['estados-fill'] })[0];
+    limpar();
+    if (!f) { panel.innerHTML = PANEL_VAZIO; return; }
+
+    selEstado = String(f.id);
+    fs('estados', selEstado, 'selecionado', true);
+    const feat = dados.features.find((x: any) => x.properties.cod === selEstado);
     const p = feat.properties;
+    filtroMun(p.uf);
     panel.innerHTML = `<h2>${p.nome} (${p.uf})</h2>
       <p><b>Região:</b> ${p.regiao}</p>
-      <p><b>Área:</b> ${Number(p.area_km2).toLocaleString('pt-BR')} km²</p>`;
+      <p><b>Área:</b> ${Number(p.area_km2).toLocaleString('pt-BR')} km²</p>
+      <p>Clique em um município.</p>`;
     map.fitBounds(limites(feat.geometry), { padding: 80, duration: 800 });
   });
 });
