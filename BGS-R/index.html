@@ -6,6 +6,18 @@
   </head>
   <body>
     <div id="map"></div>
+    <div id="controle">
+      <input id="busca" type="text" placeholder="Buscar município..." autocomplete="off" />
+      <div id="resultados"></div>
+      <label>Indicador
+        <select id="ind">
+          <option value="">Nenhum</option>
+          <option value="pop">População</option>
+          <option value="dens">Densidade</option>
+        </select>
+      </label>
+      <div id="legenda"></div>
+    </div>
     <aside id="panel"></aside>
     <script type="module" src="/src/main.ts"></script>
   </body>
