@@ -191,17 +191,118 @@ map.on('load', async () => {
     if (k != null) irParaMunicipio(achados[Number(k)]);
   });
 
+  const caixaMun = new Map<string, any[]>(busca.map((c) => [c[0], c]));
+
+  // ===== Ferramenta de raio =====  
+  const rBtn = document.getElementById('raio-btn') as HTMLButtonElement;  
+  const rKm = document.getElementById('raio-km') as HTMLSelectElement;  
+  let raioAtivo = false;  
+  let raioCentro: [number, number] | null = null;  
+  const centros = busca.map((c) => ({    
+    nome: c[1] as string,    
+    uf: c[2] as string,    
+    lon: (c[3] + c[5]) / 2,    
+    lat: (c[4] + c[6]) / 2,    
+    pop: (ind[c[0]]?.pop ?? 0) as number,  
+  }));  
+  const R_TERRA = 6371;  
+  const rad = (g: number) => (g * Math.PI) / 180;  
+  function distKm(lon1: number, lat1: number, lon2: number, lat2: number) {    
+    const dLat = rad(lat2 - lat1), dLon = rad(lon2 - lon1);    
+    const a = Math.sin(dLat / 2) ** 2 +      
+      Math.cos(rad(lat1)) * Math.cos(rad(lat2)) * Math.sin(dLon / 2) ** 2;    
+    return 2 * R_TERRA * Math.asin(Math.sqrt(a));  
+  }  
+  function circuloGeo(lon: number, lat: number, km: number, passos = 96) {    
+    const pts: number[][] = [];    
+    const d = km / R_TERRA, la = rad(lat), lo = rad(lon);    
+    for (let i = 0; i <= passos; i++) {      
+      const b = (2 * Math.PI * i) / passos;      
+      const la2 = Math.asin(Math.sin(la) * Math.cos(d) + Math.cos(la) * Math.sin(d) * Math.cos(b));      
+      const lo2 = lo + Math.atan2(Math.sin(b) * Math.sin(d) * Math.cos(la),        
+        Math.cos(d) - Math.sin(la) * Math.sin(la2));      
+      pts.push([(lo2 * 180) / Math.PI, (la2 * 180) / Math.PI]);    }    
+    return pts;  
+  }  
+  const VAZIO: any = { type: 'FeatureCollection', features: [] };  
+  const ehPoligono: any = ['==', ['geometry-type'], 'Polygon'];  
+  const ehPonto: any = ['==', ['geometry-type'], 'Point'];  
+  map.addSource('raio', { type: 'geojson', data: VAZIO });  
+  map.addLayer({ id: 'raio-fill', type: 'fill', source: 'raio', filter: ehPoligono,    
+    paint: { 'fill-color': '#f59e0b', 'fill-opacity': 0.1 } });  
+  map.addLayer({ id: 'raio-line', type: 'line', source: 'raio', filter: ehPoligono,    
+    paint: { 'line-color': '#f59e0b', 'line-width': 2, 'line-dasharray': [2, 2] } });  
+  map.addLayer({ id: 'raio-centro', type: 'circle', source: 'raio', filter: ehPonto,    
+    paint: { 'circle-radius': 5, 'circle-color': '#f59e0b',      
+      'circle-stroke-color': '#ffffff', 'circle-stroke-width': 1.5 } });  
+  const fonteRaio = () => map.getSource('raio') as maplibregl.GeoJSONSource;  
+  function aplicarRaio() {    
+    if (!raioCentro) return;    
+    const [lon, lat] = raioCentro;    
+    const km = Number(rKm.value);    
+    const anel = circuloGeo(lon, lat, km);    
+    fonteRaio().setData({      
+      type: 'FeatureCollection',      
+      features: [        
+        { type: 'Feature', properties: {}, geometry: { type: 'Polygon', coordinates: [anel] } },        
+        { type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: [lon, lat] } },      
+      ],    } as any);    
+    const dentro = centros.filter((m) => distKm(lon, lat, m.lon, m.lat) <= km);    
+    const total = dentro.reduce((s, m) => s + m.pop, 0);    
+    const top = [...dentro].sort((a, b) => b.pop - a.pop).slice(0, 8);    
+    panel.innerHTML = `<h2>Raio de ${km} km</h2>      
+      <p><b>Municípios:</b> ${fmt(dentro.length)}</p>      
+      <p><b>População (2022):</b> ${fmt(total)} hab.</p>      
+      <p><b>Mais populosos:</b></p>      
+      <ol class="top">${top.map((m) =>        
+        `<li>${m.nome}<small>${m.uf}</small><span>${fmt(m.pop)}</span></li>`).join('')}</ol>      
+      <p class="nota">Critério: centro da caixa envolvente de cada município (aproximação).</p>`;    
+    const b = new maplibregl.LngLatBounds();    
+    anel.forEach((p) => b.extend(p as [number, number]));    
+    map.fitBounds(b, { padding: 60, duration: 600 });  
+  }  
+  function ligarRaio(on: boolean) {    
+    raioAtivo = on;    
+    raioCentro = null;    
+    document.body.classList.toggle('raio-ativo', on);    
+    rBtn.classList.toggle('ligado', on);    
+    rBtn.textContent = on ? 'Raio: ligado' : 'Raio';    
+    fonteRaio().setData(VAZIO);    
+    if (on) {      
+      limpar();      
+      panel.innerHTML = '<h2>Ferramenta de raio</h2><p>Clique no mapa para definir o centro.</p>';    
+    } else {      
+      panel.innerHTML = PANEL_VAZIO;    }  
+  }  
+  rBtn.addEventListener('click', () => ligarRaio(!raioAtivo));  
+  rKm.addEventListener('change', aplicarRaio);  
+  document.addEventListener('keydown', (e) => {    
+    if (e.key === 'Escape' && raioAtivo) ligarRaio(false);  });  
+  map.on('click', (e) => {    
+    if (!raioAtivo) return;    
+    raioCentro = [e.lngLat.lng, e.lngLat.lat];    
+    aplicarRaio();  });
+
   map.on('click', (e) => {
+    if (raioAtivo) return;
     const m = map.queryRenderedFeatures(e.point, { layers: ['mun-fill'] })[0];
-    if (m) {
+    const ufSel = selEstado
+      ? dados.features.find((x: any) => x.properties.cod === selEstado)?.properties.uf
+      : null;
+
+    // Município do estado já selecionado: seleciona e dá zoom nele
+    if (m && ufSel && (m.properties as any).uf === ufSel) {
       if (selMun) fs('mun', selMun, 'selecionado', false);
       selMun = String(m.id);
       fs('mun', selMun, 'selecionado', true);
       const p: any = m.properties;
       mostrarMunicipio(p.cod, p.nome, p.uf);
+      const c = caixaMun.get(p.cod);
+      if (c) map.fitBounds([[c[3], c[4]], [c[5], c[6]]], { padding: 120, duration: 800, maxZoom: 10 });
       return;
     }
 
+    // Caso contrário: clique de estado (zoom no estado)
     const f = map.queryRenderedFeatures(e.point, { layers: ['estados-fill'] })[0];
     limpar();
     if (!f) { panel.innerHTML = PANEL_VAZIO; return; }
