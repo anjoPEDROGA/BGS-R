@@ -1,60 +1,77 @@
-import './style.css'
-import heroImg from './assets/hero.png'
-import typescriptLogo from './assets/typescript.svg'
-import viteLogo from './assets/vite.svg'
-import { setupCounter } from './counter.ts'
+import * as maplibregl from 'maplibre-gl';
+import 'maplibre-gl/dist/maplibre-gl.css';
+import './style.css';
 
-document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
-<section id="center">
-  <div class="hero">
-    <img src="${heroImg}" class="base" width="170" height="179">
-    <img src="${typescriptLogo}" class="framework" alt="TypeScript logo"/>
-    <img src="${viteLogo}" class="vite" alt="Vite logo" />
-  </div>
-  <div>
-    <h1>Get started</h1>
-    <p>Edit <code>src/main.ts</code> and save to test <code>HMR</code></p>
-  </div>
-  <button id="counter" type="button" class="counter"></button>
-</section>
 
-<div class="ticks"></div>
+const URL_ESTADOS = '/data/geo/estados.geojson';
+const panel = document.getElementById('panel')!;
+const PANEL_VAZIO = '<p>Clique em um estado.</p>';
+panel.innerHTML = PANEL_VAZIO;
 
-<section id="next-steps">
-  <div id="docs">
-    <svg class="icon" role="presentation" aria-hidden="true"><use href="/icons.svg#documentation-icon"></use></svg>
-    <h2>Documentation</h2>
-    <p>Your questions, answered</p>
-    <ul>
-      <li>
-        <a href="https://vite.dev/" target="_blank">
-          <img class="logo" src="${viteLogo}" alt="" />
-          Explore Vite
-        </a>
-      </li>
-      <li>
-        <a href="https://www.typescriptlang.org" target="_blank">
-          <img class="button-icon" src="${typescriptLogo}" alt="">
-          Learn more
-        </a>
-      </li>
-    </ul>
-  </div>
-  <div id="social">
-    <svg class="icon" role="presentation" aria-hidden="true"><use href="/icons.svg#social-icon"></use></svg>
-    <h2>Connect with us</h2>
-    <p>Join the Vite community</p>
-    <ul>
-      <li><a href="https://github.com/vitejs/vite" target="_blank"><svg class="button-icon" role="presentation" aria-hidden="true"><use href="/icons.svg#github-icon"></use></svg>GitHub</a></li>
-      <li><a href="https://chat.vite.dev/" target="_blank"><svg class="button-icon" role="presentation" aria-hidden="true"><use href="/icons.svg#discord-icon"></use></svg>Discord</a></li>
-      <li><a href="https://x.com/vite_js" target="_blank"><svg class="button-icon" role="presentation" aria-hidden="true"><use href="/icons.svg#x-icon"></use></svg>X.com</a></li>
-      <li><a href="https://bsky.app/profile/vite.dev" target="_blank"><svg class="button-icon" role="presentation" aria-hidden="true"><use href="/icons.svg#bluesky-icon"></use></svg>Bluesky</a></li>
-    </ul>
-  </div>
-</section>
+function limites(geom: any): maplibregl.LngLatBounds {
+  const b = new maplibregl.LngLatBounds();
+  const percorrer = (c: any) => (typeof c[0] === 'number' ? b.extend(c) : c.forEach(percorrer));
+  percorrer(geom.coordinates);
+  return b;
+}
 
-<div class="ticks"></div>
-<section id="spacer"></section>
-`
+const map = new maplibregl.Map({
+  container: 'map',
+  style: { version: 8, sources: {}, layers: [{ id: 'fundo', type: 'background', paint: { 'background-color': '#0b0f14' } }] },
+  center: [-52, -14],
+  zoom: 3.6,
+  attributionControl: false,
+});
 
-setupCounter(document.querySelector<HTMLButtonElement>('#counter')!)
+map.on('load', async () => {
+  const dados = await (await fetch(URL_ESTADOS)).json();
+  map.addSource('estados', { type: 'geojson', data: dados, promoteId: 'cod' });
+
+  map.addLayer({
+    id: 'estados-fill', type: 'fill', source: 'estados',
+    paint: {
+      'fill-color': ['case',
+        ['boolean', ['feature-state', 'selecionado'], false], '#f59e0b',
+        ['boolean', ['feature-state', 'hover'], false], '#3b82f6',
+        '#1f3a5f'],
+      'fill-opacity': 0.75,
+    },
+  });
+  map.addLayer({
+    id: 'estados-line', type: 'line', source: 'estados',
+    paint: { 'line-color': '#5b7fa6', 'line-width': 0.8 },
+  });
+
+  let sel: string | null = null;
+  let hov: string | null = null;
+  const set = (id: string, k: string, v: boolean) =>
+    map.setFeatureState({ source: 'estados', id }, { [k]: v });
+
+  map.on('mousemove', 'estados-fill', (e) => {
+    map.getCanvas().style.cursor = 'pointer';
+    const id = e.features?.[0]?.id as string | undefined;
+    if (!id || id === hov) return;
+    if (hov) set(hov, 'hover', false);
+    hov = id; set(id, 'hover', true);
+  });
+  map.on('mouseleave', 'estados-fill', () => {
+    map.getCanvas().style.cursor = '';
+    if (hov) set(hov, 'hover', false);
+    hov = null;
+  });
+
+  map.on('click', (e) => {
+    const f = map.queryRenderedFeatures(e.point, { layers: ['estados-fill'] })[0];
+    if (sel) set(sel, 'selecionado', false);
+    if (!f) { sel = null; panel.innerHTML = PANEL_VAZIO; return; }
+
+    sel = String(f.id);
+    set(sel, 'selecionado', true);
+    const feat = dados.features.find((x: any) => x.properties.cod === sel);
+    const p = feat.properties;
+    panel.innerHTML = `<h2>${p.nome} (${p.uf})</h2>
+      <p><b>Região:</b> ${p.regiao}</p>
+      <p><b>Área:</b> ${Number(p.area_km2).toLocaleString('pt-BR')} km²</p>`;
+    map.fitBounds(limites(feat.geometry), { padding: 80, duration: 800 });
+  });
+});
